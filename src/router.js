@@ -5,55 +5,56 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 const secret = process.env.JWT_SECRET
 
-const router = express.Router();
-const mockUser = {
-    username: 'authguy',
-    password: 'mypassword',
-    profile: {
-        firstName: 'Ben',
-        lastName: 'Dover',
-    }
-}
+
 
 router.post('/register', async (req, res) => {
-    const { username, password } = req.body
+    const { username, password } = req.body;
 
-    const saltRound = 10
-    const salt = bcrypt.genSaltSync(saltRound)
+    const saltRounds = 10;
 
-    const hash = bcrypt.hashSync(password, salt)
+    bcrypt.hash(password, saltRounds, async (err, hashed_pw) => {
+        try {
+            const new_user = await prisma.user.create({
+                data: {
+                    username,
+                    password: hashed_pw
+                }
+            })
+            delete new_user.password;
 
-    res.json({ username, password: hash })
-});
+            res.status(201).json({ user: new_user })
+        } catch (error) {
+            if (error.code === "P2002") {
+                res.status(403).json({ error: `The username ${username} is already taken!` })
+            } else {
+                res.status(500).json({ error })
+            }
+        }
+    })
+})
 
 router.post('/login', async (req, res) => {
-    const { username, password } = req.body
-
-    if (username === mockUser.username) {
-
-        if (password === mockUser.password) {
-            const token = jwt.sign(username, secret)
-            res.json({ token })
-        } else {
-            res.status(404).json({ error: "incorrect password" })
+    const { username, password } = req.body;
+    const user = await prisma.user.findUnique({
+        where: {
+            username
         }
+    });
 
-    } else {
-        res.status(404).json({ error: "username not found" })
+    if (!user) {
+        return res.status(401).json({ error: "Invalid username or password!" })
     }
 
+    bcrypt.compare(password, user.password, (err, result) => {
+        if (!result) {
+            return res.status(401).json({ error: "Invalid username or password!" })
+        } else {
+            const secret = process.env.JWT_SECRET;
+            const access_token = jwt.sign({ sub: user.id, username: user.username }, secret);
+
+            res.status(201).json({ access_token })
+        }
+    })
 });
 
 module.exports = router;
-
-// async function checkUser(username, password) {
-//     //... fetch user from a db etc.
-
-//     const match = await bcrypt.compare(password, user.passwordHash);
-
-//     if (match) {
-//         //login
-//     }
-
-//     //...
-// }
